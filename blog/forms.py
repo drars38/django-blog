@@ -16,3 +16,4 @@ class CommentForm(forms.ModelForm):
         labels = {
             'content': 'Комментарий'
         }
+

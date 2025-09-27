@@ -180,3 +180,4 @@ sudo systemctl status jenkins
 ### Логи
 - **Jenkins logs**: `/var/log/jenkins/jenkins.log` (Linux) или в Windows Service
 - **Job logs**: Console Output в Jenkins UI
+

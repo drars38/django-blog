@@ -38,3 +38,4 @@ python -c "import django; print(django.get_version())"
 echo - Тесты: Запущены
 
 pause
+

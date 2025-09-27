@@ -10,3 +10,4 @@ urlpatterns = [
     path('create-post/', views.create_post, name='create_post'),
     path('api/posts/', views.api_posts, name='api_posts'),
 ]
+

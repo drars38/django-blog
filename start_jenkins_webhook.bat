@@ -1,11 +1,11 @@
 @echo off
-echo 🚀 Запуск Jenkins с ngrok туннелем
-echo ==================================
+echo 🚀 Запуск Jenkins с webhook для GitHub
+echo =====================================
 
 REM Проверяем, установлен ли ngrok
 if not exist "C:\ngrok\ngrok.exe" (
     echo ❌ ngrok не найден в C:\ngrok\
-    echo Запустите install_ngrok.bat для установки
+    echo Запустите setup_ngrok.bat для установки
     pause
     exit /b 1
 )
@@ -16,9 +16,8 @@ curl -s http://localhost:8080 >nul 2>&1
 if %errorlevel% neq 0 (
     echo ⚠️ Jenkins не запущен на порту 8080
     echo 🚀 Запускаем Jenkins...
-    start "Jenkins" cmd /k "echo Запуск Jenkins... && java -jar jenkins.war --httpPort=8080"
-    echo ⏳ Ждем запуска Jenkins (30 секунд)...
-    timeout /t 30 /nobreak >nul
+    echo Откройте http://localhost:8080 в браузере
+    echo Настройте Jenkins согласно инструкции
 ) else (
     echo ✅ Jenkins уже запущен
 )
@@ -41,6 +40,8 @@ echo 5. Events: Just the push event
 echo.
 echo 🔗 Jenkins доступен по адресу: http://localhost:8080
 echo 🌐 Публичный URL будет показан в окне ngrok
+echo.
+echo 📚 Подробная инструкция в JENKINS_SETUP.md
 echo.
 pause
 
