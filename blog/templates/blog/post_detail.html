@@ -1,0 +1,101 @@
+{% extends 'blog/base.html' %}
+
+{% block title %}{{ post.title }} - Мой Блог{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-8">
+        <article class="card">
+            <div class="card-body">
+                <h1 class="card-title">{{ post.title }}</h1>
+                <div class="text-muted mb-3">
+                    <small>
+                        <strong>Автор:</strong> {{ post.author.username }} • 
+                        <strong>Дата:</strong> {{ post.created_at|date:"d.m.Y H:i" }}
+                        {% if post.updated_at != post.created_at %}
+                            • <strong>Обновлено:</strong> {{ post.updated_at|date:"d.m.Y H:i" }}
+                        {% endif %}
+                    </small>
+                </div>
+                <div class="card-text">
+                    {{ post.content|linebreaks }}
+                </div>
+            </div>
+        </article>
+
+        <!-- Комментарии -->
+        <div class="mt-5">
+            <h3>Комментарии ({{ comments.count }})</h3>
+            
+            {% if user.is_authenticated %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5>Добавить комментарий</h5>
+                    </div>
+                    <div class="card-body">
+                        <form method="post">
+                            {% csrf_token %}
+                            <div class="mb-3">
+                                {{ form.content }}
+                            </div>
+                            <button type="submit" class="btn btn-primary">Отправить</button>
+                        </form>
+                    </div>
+                </div>
+            {% else %}
+                <div class="alert alert-info">
+                    <a href="{% url 'admin:login' %}">Войдите</a> или 
+                    <a href="{% url 'register' %}">зарегистрируйтесь</a>, чтобы оставить комментарий.
+                </div>
+            {% endif %}
+
+            {% if comments %}
+                {% for comment in comments %}
+                    <div class="comment">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <strong>{{ comment.author.username }}</strong>
+                                <small class="text-muted">{{ comment.created_at|date:"d.m.Y H:i" }}</small>
+                            </div>
+                        </div>
+                        <p class="mt-2 mb-0">{{ comment.content|linebreaks }}</p>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="alert alert-light text-center">
+                    <p class="mb-0">Пока нет комментариев. Будьте первым!</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header">
+                <h5>Навигация</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled">
+                    <li><a href="{% url 'home' %}" class="text-decoration-none">← Главная</a></li>
+                    <li><a href="{% url 'post_list' %}" class="text-decoration-none">← Все статьи</a></li>
+                    {% if user.is_authenticated %}
+                        <li><a href="{% url 'my_posts' %}" class="text-decoration-none">Мои статьи</a></li>
+                        <li><a href="{% url 'create_post' %}" class="text-decoration-none">Создать статью</a></li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header">
+                <h5>Информация о статье</h5>
+            </div>
+            <div class="card-body">
+                <p><strong>Автор:</strong> {{ post.author.username }}</p>
+                <p><strong>Создана:</strong> {{ post.created_at|date:"d.m.Y H:i" }}</p>
+                <p><strong>Комментариев:</strong> {{ comments.count }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
