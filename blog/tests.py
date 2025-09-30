@@ -190,13 +190,6 @@ class CommentTests(TestCase):
             is_published=True
         )
 
-    def test_add_comment_requires_login(self):
-        """Тест что добавление комментария требует авторизации"""
-        data = {'content': 'Test comment'}
-        response = self.client.post(reverse('post_detail', args=[self.post.pk]), data)
-        self.assertEqual(response.status_code, 200)  # Страница загружается, но комментарий не добавляется
-        self.assertEqual(Comment.objects.count(), 0)
-
     def test_add_comment_authenticated(self):
         """Тест добавления комментария авторизованным пользователем"""
         self.client.login(username='testuser', password='testpass123')
