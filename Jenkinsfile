@@ -63,11 +63,11 @@ pipeline {
         stage('Merge dev -> main (on success)') {
             when {
                 expression {
-                    def currentBranch = env.BRANCH_NAME
-                    if (!currentBranch) {
-                        currentBranch = bat(script: 'git rev-parse --abbrev-ref HEAD', returnStdout: true).trim()
-                    }
-                    echo "Текущая ветка: ${currentBranch}"
+                    // Получаем имя ветки из стандартных переменных Jenkins (для single pipeline GIT_BRANCH, для multibranch BRANCH_NAME)
+                    def currentBranch = env.BRANCH_NAME ?: env.GIT_BRANCH ?: ''
+                    // Нормализуем возможные значения вроде 'origin/dev' или 'refs/heads/dev'
+                    currentBranch = currentBranch.replace('origin/', '').replace('refs/heads/', '')
+                    echo "Определена ветка: ${currentBranch}"
                     return currentBranch == 'dev'
                 }
             }
