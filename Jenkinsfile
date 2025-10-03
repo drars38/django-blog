@@ -6,6 +6,10 @@ pipeline {
         timestamps()
     }
 
+    parameters {
+        booleanParam(name: 'MERGE_TO_MAIN', defaultValue: false, description: 'Включить авто-мердж dev -> main после успешной сборки')
+    }
+
     triggers {
         // Требуется установленный GitHub plugin и настроенный webhook на Jenkins
         githubPush()
@@ -86,6 +90,9 @@ pipeline {
         }
 
         stage('Merge dev -> main (on success)') {
+            when {
+                expression { return params.MERGE_TO_MAIN }
+            }
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: GITHUB_CREDENTIALS_ID, usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_TOKEN')]) {
