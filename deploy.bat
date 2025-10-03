@@ -1,65 +1,41 @@
 @echo off
-REM Скрипт автоматического развертывания Django приложения для Windows
+setlocal enabledelayedexpansion
 
-echo 🚀 Начинаем развертывание Django Blog Application...
+:: Usage: deploy.bat dev 8001  or deploy.bat prod 8000
+set ENV=%1
+set PORT=%2
 
-REM Проверяем наличие Python
-python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ❌ Python не найден. Установите Python 3.8+
-    pause
-    exit /b 1
+if "%ENV%"=="" (
+  echo Usage: deploy.bat ^<dev|prod^> ^<port^>
+  exit /b 1
 )
 
-REM Проверяем наличие pip
-pip --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo ❌ pip не найден. Установите pip
-    pause
-    exit /b 1
+if "%PORT%"=="" (
+  echo Usage: deploy.bat ^<dev|prod^> ^<port^>
+  exit /b 1
 )
 
-echo ✅ Python и pip найдены
+echo ===============================
+echo Deploy to %ENV% on port %PORT%
+echo ===============================
 
-REM Создаем виртуальное окружение
-echo 📦 Создаем виртуальное окружение...
-python -m venv venv
+echo Stopping process on port %PORT% (if any)...
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":%PORT%" ^| findstr LISTENING') do (
+  echo Killing PID %%p
+  taskkill /F /PID %%p >nul 2>&1
+)
 
-REM Активируем виртуальное окружение
-echo 🔧 Активируем виртуальное окружение...
-call venv\Scripts\activate.bat
+echo Applying migrations...
+python manage.py migrate --noinput
 
-REM Устанавливаем зависимости
-echo 📚 Устанавливаем зависимости...
-pip install -r requirements.txt
-
-REM Выполняем миграции
-echo 🗄️ Выполняем миграции базы данных...
-python manage.py makemigrations
-python manage.py migrate
-
-REM Создаем суперпользователя (если не существует)
-echo 👤 Создаем суперпользователя...
-python manage.py shell -c "from django.contrib.auth.models import User; User.objects.create_superuser('admin', 'admin@example.com', 'admin123') if not User.objects.filter(username='admin').exists() else print('Суперпользователь уже существует')"
-
-REM Собираем статические файлы
-echo 📁 Собираем статические файлы...
+REM Добавлено: сборка статики для корректной работы collectstatic в CI
 python manage.py collectstatic --noinput
 
-REM Запускаем тесты
-echo 🧪 Запускаем тесты...
-python manage.py test
+echo Starting server in background...
+:: Start in a new window minimized; logs to deploy_%ENV%.log
+start "django-%ENV%" /MIN cmd /c "python manage.py runserver 0.0.0.0:%PORT% 1>>deploy_%ENV%.log 2>&1"
 
-if %errorlevel% equ 0 (
-    echo ✅ Все тесты прошли успешно!
-    echo 🎉 Развертывание завершено успешно!
-    echo 🌐 Запустите сервер командой: python manage.py runserver
-    echo 🔗 Откройте http://127.0.0.1:8000 в браузере
-    echo 👤 Админ панель: http://127.0.0.1:8000/admin (admin/admin123)
-) else (
-    echo ❌ Некоторые тесты не прошли. Проверьте код.
-    pause
-    exit /b 1
-)
+echo ✅ Deploy completed: %ENV% on http://localhost:%PORT%
+exit /b 0
 
-pause
+

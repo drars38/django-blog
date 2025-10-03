@@ -26,14 +26,18 @@ def post_detail(request, pk):
     comments = post.comments.all()
     
     if request.method == 'POST':
-        form = CommentForm(request.POST)
-        if form.is_valid():
-            comment = form.save(commit=False)
-            comment.post = post
-            comment.author = request.user
-            comment.save()
-            messages.success(request, 'Комментарий добавлен!')
-            return redirect('post_detail', pk=post.pk)
+        if request.user.is_authenticated:
+            form = CommentForm(request.POST)
+            if form.is_valid():
+                comment = form.save(commit=False)
+                comment.post = post
+                comment.author = request.user
+                comment.save()
+                messages.success(request, 'Комментарий добавлен!')
+                return redirect('post_detail', pk=post.pk)
+        else:
+            messages.error(request, 'Для добавления комментария необходимо войти в систему.')
+            form = CommentForm()
     else:
         form = CommentForm()
     

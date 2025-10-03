@@ -1,114 +1,165 @@
 pipeline {
     agent any
-    
+
+    options {
+        skipDefaultCheckout(true)
+        timestamps()
+    }
+
+    parameters {
+        booleanParam(name: 'MERGE_TO_MAIN', defaultValue: false, description: 'Включить авто-мердж dev -> main после успешной сборки')
+    }
+
+    triggers {
+        // Требуется установленный GitHub plugin и настроенный webhook на Jenkins
+        githubPush()
+    }
+
     environment {
         DJANGO_SETTINGS_MODULE = 'myproject.settings'
         PYTHONPATH = "${WORKSPACE}"
+        // ВАЖНО: добавьте креденшлы в Jenkins и укажите их ID здесь
+        GITHUB_CREDENTIALS_ID = 'github-token1'
     }
-    
+
     stages {
         stage('Checkout') {
             steps {
                 checkout scm
-                echo 'Код получен из репозитория'
+                bat 'git status'
             }
         }
-        
-        stage('Setup Python Environment') {
+
+        stage('Setup Python') {
             steps {
-                echo 'Настройка Python окружения'
                 bat '''
                     python --version
                     pip --version
                 '''
             }
         }
-        
-        stage('Install Dependencies') {
+
+        stage('Install dependencies') {
             steps {
-                echo 'Установка зависимостей'
                 bat '''
                     pip install -r requirements.txt
                 '''
             }
         }
-        
-        stage('Database Setup') {
+
+        stage('Migrate (SQLite)') {
             steps {
-                echo 'Настройка базы данных'
                 bat '''
                     python manage.py makemigrations --noinput
                     python manage.py migrate --noinput
                 '''
             }
         }
-        
-        stage('Run Tests') {
+
+        stage('Run tests') {
             steps {
-                echo 'Запуск автотестов'
-                bat '''
-                    python manage.py test --verbosity=2
-                '''
-            }
-            post {
-                always {
-                    echo 'Тестирование завершено'
-                }
-                success {
-                    echo 'Все тесты прошли успешно!'
-                }
-                failure {
-                    echo 'Некоторые тесты не прошли'
+                script {
+                    try {
+                        bat '''
+                            python manage.py test --verbosity=2
+                        '''
+                        echo '✅ Все тесты прошли успешно!'
+                    } catch (e) {
+                        echo '❌ Некоторые тесты не прошли. Проверьте код.'
+                        throw e
+                    }
                 }
             }
         }
-        
-        stage('Code Quality Check') {
+
+        stage('Collect static') {
             steps {
-                echo 'Проверка качества кода'
                 bat '''
-                    python -m py_compile manage.py
-                    python -m py_compile blog/models.py
-                    python -m py_compile blog/views.py
-                    python -m py_compile blog/tests.py
+                    echo "\uD83D\uDCC1 Собираем статические файлы..."
+                    python manage.py collectstatic --noinput
                 '''
             }
         }
-        
-        stage('Build Documentation') {
+
+        stage('Deploy Dev') {
             steps {
-                echo 'Сборка документации'
                 bat '''
-                    echo "Документация проекта:" > build_info.txt
-                    echo "Проект: Django Blog Application" >> build_info.txt
-                    echo "Ветка: ${env.BRANCH_NAME}" >> build_info.txt
-                    echo "Коммит: ${env.GIT_COMMIT}" >> build_info.txt
-                    echo "Дата сборки: %DATE% %TIME%" >> build_info.txt
+                    call deploy.bat dev 8001
+                '''
+            }
+        }
+
+        stage('Merge dev -> main (on success)') {
+            when {
+                expression { return params.MERGE_TO_MAIN }
+            }
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: GITHUB_CREDENTIALS_ID, usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_TOKEN')]) {
+                        // Подготовка и checkout main
+                        bat '''
+                            setlocal enableextensions enabledelayedexpansion
+                            git config user.name "Jenkins CI"
+                            git config user.email "ci@example.local"
+                            for /f "delims=" %%i in ('git remote get-url origin') do set ORIGIN_URL=%%i
+                            set AUTH_URL=!ORIGIN_URL:https://=https://%GIT_USERNAME%:%GIT_TOKEN%@!
+                            git fetch origin +refs/heads/*:refs/remotes/origin/*
+                            git checkout -B main origin/main
+                        '''
+
+                        // Пытаемся смёрджить dev -> main и читаем код возврата
+                        def mergeCode = bat(returnStatus: true, script: '''
+                            git merge --no-ff dev -m "Auto-merge dev into main [Jenkins]"
+                        ''')
+
+                        if (mergeCode != 0) {
+                            echo '⚠️ Конфликт при мердже dev -> main. Требуется ручное разрешение.'
+                            bat '''
+                                git merge --abort 2>nul || ver >nul
+                                git reset --merge 2>nul || ver >nul
+                                git checkout -f dev 2>nul || ver >nul
+                            '''
+                            error 'Merge conflict occurred'
+                        }
+
+                        // Пушим main только если merge прошёл успешно
+                        bat '''
+                            setlocal enableextensions enabledelayedexpansion
+                            for /f "delims=" %%i in ('git remote get-url origin') do set ORIGIN_URL=%%i
+                            set AUTH_URL=!ORIGIN_URL:https://=https://%GIT_USERNAME%:%GIT_TOKEN%@!
+                            git push "!AUTH_URL!" main
+                            git checkout dev
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Deploy Prod') {
+            steps {
+                bat '''
+                    rem Обновляем локальный main до origin/main и деплоим
+                    git fetch origin +refs/heads/*:refs/remotes/origin/*
+                    git checkout -B main origin/main
+                    call deploy.bat prod 8000
+                    rem Возвращаемся на dev для консистентности
+                    git checkout dev
                 '''
             }
         }
     }
-    
+
     post {
-        always {
-            echo 'Сборка завершена'
-            archiveArtifacts artifacts: 'build_info.txt', fingerprint: true
-        }
         success {
-            echo 'Сборка прошла успешно!'
-            emailext (
-                subject: "✅ Успешная сборка: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
-                body: "Сборка ${env.BUILD_NUMBER} в проекте ${env.JOB_NAME} прошла успешно.\nВетка: ${env.BRANCH_NAME}\nКоммит: ${env.GIT_COMMIT}",
-                to: "${env.CHANGE_AUTHOR_EMAIL}"
-            )
+            echo '✅ Сборка прошла успешно'
         }
         failure {
-            echo 'Сборка завершилась с ошибкой!'
-            emailext (
-                subject: "❌ Ошибка сборки: ${env.JOB_NAME} - ${env.BUILD_NUMBER}",
-                body: "Сборка ${env.BUILD_NUMBER} в проекте ${env.JOB_NAME} завершилась с ошибкой.\nВетка: ${env.BRANCH_NAME}\nКоммит: ${env.GIT_COMMIT}",
-                to: "${env.CHANGE_AUTHOR_EMAIL}"
-            )
+            echo '❌ Ошибка сборки'
+        }
+        always {
+            echo "Готово: ${currentBuild.currentResult}"
         }
     }
 }
+
+

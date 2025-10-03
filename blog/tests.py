@@ -190,7 +190,6 @@ class CommentTests(TestCase):
             is_published=True
         )
 
-
     def test_add_comment_authenticated(self):
         """Тест добавления комментария авторизованным пользователем"""
         self.client.login(username='testuser', password='testpass123')
