@@ -54,8 +54,25 @@ pipeline {
 
         stage('Run tests') {
             steps {
+                script {
+                    try {
+                        bat '''
+                            python manage.py test --verbosity=2
+                        '''
+                        echo '✅ Все тесты прошли успешно!'
+                    } catch (e) {
+                        echo '❌ Некоторые тесты не прошли. Проверьте код.'
+                        throw e
+                    }
+                }
+            }
+        }
+
+        stage('Collect static') {
+            steps {
                 bat '''
-                    python manage.py test --verbosity=2
+                    echo "\uD83D\uDCC1 Собираем статические файлы..."
+                    python manage.py collectstatic --noinput
                 '''
             }
         }
@@ -70,32 +87,43 @@ pipeline {
 
         stage('Merge dev -> main (on success)') {
             steps {
-                withCredentials([usernamePassword(credentialsId: GITHUB_CREDENTIALS_ID, usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_TOKEN')]) {
-                    bat '''
-                        setlocal enableextensions enabledelayedexpansion
-                        git config user.name "Jenkins CI"
-                        git config user.email "ci@example.local"
+                script {
+                    withCredentials([usernamePassword(credentialsId: GITHUB_CREDENTIALS_ID, usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_TOKEN')]) {
+                        // Подготовка и checkout main
+                        bat '''
+                            setlocal enableextensions enabledelayedexpansion
+                            git config user.name "Jenkins CI"
+                            git config user.email "ci@example.local"
+                            for /f "delims=" %%i in ('git remote get-url origin') do set ORIGIN_URL=%%i
+                            set AUTH_URL=!ORIGIN_URL:https://=https://%GIT_USERNAME%:%GIT_TOKEN%@!
+                            git fetch origin +refs/heads/*:refs/remotes/origin/*
+                            git checkout -B main origin/main
+                        '''
 
-                        rem Получаем origin URL
-                        for /f "delims=" %%i in ('git remote get-url origin') do set ORIGIN_URL=%%i
-                        echo Origin: !ORIGIN_URL!
+                        // Пытаемся смёрджить dev -> main и читаем код возврата
+                        def mergeCode = bat(returnStatus: true, script: '''
+                            git merge --no-ff dev -m "Auto-merge dev into main [Jenkins]"
+                        ''')
 
-                        rem Строим URL с авторизацией для push
-                        set AUTH_URL=!ORIGIN_URL:https://=https://%GIT_USERNAME%:%GIT_TOKEN%@!
+                        if (mergeCode != 0) {
+                            echo '⚠️ Конфликт при мердже dev -> main. Требуется ручное разрешение.'
+                            bat '''
+                                git merge --abort 2>nul || ver >nul
+                                git reset --merge 2>nul || ver >nul
+                                git checkout -f dev 2>nul || ver >nul
+                            '''
+                            error 'Merge conflict occurred'
+                        }
 
-                        rem Обновляем refs
-                        git fetch origin +refs/heads/*:refs/remotes/origin/*
-
-                        rem Переключаемся на main и подтягиваем актуальное
-                        git checkout -B main origin/main
-                        git merge --no-ff dev -m "Auto-merge dev into main [Jenkins]"
-
-                        rem Пушим main
-                        git push "!AUTH_URL!" main
-
-                        rem Возврат на dev (необязательно)
-                        git checkout dev
-                    '''
+                        // Пушим main только если merge прошёл успешно
+                        bat '''
+                            setlocal enableextensions enabledelayedexpansion
+                            for /f "delims=" %%i in ('git remote get-url origin') do set ORIGIN_URL=%%i
+                            set AUTH_URL=!ORIGIN_URL:https://=https://%GIT_USERNAME%:%GIT_TOKEN%@!
+                            git push "!AUTH_URL!" main
+                            git checkout dev
+                        '''
+                    }
                 }
             }
         }
