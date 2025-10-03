@@ -7,7 +7,7 @@ pipeline {
     }
 
     parameters {
-        booleanParam(name: 'MERGE_TO_MAIN', defaultValue: false, description: 'Включить авто-мердж dev -> main после успешной сборки')
+        booleanParam(name: 'MERGE_TO_MAIN', defaultValue: true, description: 'Включить авто-мердж dev -> main после успешной сборки')
     }
 
     triggers {
