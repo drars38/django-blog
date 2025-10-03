@@ -60,16 +60,15 @@ pipeline {
             }
         }
 
-        stage('Merge dev -> main (on success)') {
-            when {
-                expression {
-                    // Сравниваем SHA HEAD и origin/dev, работает в detached HEAD
-                    def headSha = bat(script: 'git rev-parse HEAD', returnStdout: true).trim()
-                    def devSha  = bat(script: 'git rev-parse origin/dev', returnStdout: true).trim()
-                    echo "HEAD=${headSha} | origin/dev=${devSha}"
-                    return headSha == devSha
-                }
+        stage('Deploy Dev') {
+            steps {
+                bat '''
+                    call deploy.bat dev 8001
+                '''
             }
+        }
+
+        stage('Merge dev -> main (on success)') {
             steps {
                 withCredentials([usernamePassword(credentialsId: GITHUB_CREDENTIALS_ID, usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_TOKEN')]) {
                     bat '''
@@ -98,6 +97,19 @@ pipeline {
                         git checkout dev
                     '''
                 }
+            }
+        }
+
+        stage('Deploy Prod') {
+            steps {
+                bat '''
+                    rem Обновляем локальный main до origin/main и деплоим
+                    git fetch origin +refs/heads/*:refs/remotes/origin/*
+                    git checkout -B main origin/main
+                    call deploy.bat prod 8000
+                    rem Возвращаемся на dev для консистентности
+                    git checkout dev
+                '''
             }
         }
     }
