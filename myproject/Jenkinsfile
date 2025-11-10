@@ -20,8 +20,9 @@ pipeline {
         GIT_EXE = 'C:\\Program Files\\Git\\bin\\git.exe'
         // Креденшл для логина в GHCR (Secret text с PAT) или GitHub App Token
         GHCR_CREDENTIALS_ID = 'ghcr-token'
-        GITHUB_OWNER = "${env.GIT_URL?.tokenize('/')[-2] ?: 'owner'}"
-        IMAGE_NAME = "ghcr.io/${GITHUB_OWNER}/myproject-web"
+        // ВАЖНО: избегаем вычислений в environment (ломает декларативный пайплайн). Укажи своего владельца GitHub явно.
+        GITHUB_OWNER = 'drars38'
+        IMAGE_NAME = "ghcr.io/drars38/myproject-web"
     }
 
     stages {
