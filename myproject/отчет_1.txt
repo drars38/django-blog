@@ -1,0 +1,122 @@
+1. Введение
+Цель работы: построить полноценный CI/CD для Django‑проекта на базе Jenkins с автозапуском по push в ветку dev, прогоном автотестов, автоматическим слиянием dev→main при успешных проверках и развёртыванием (CD) dev/prod окружений.
+
+Задачи:
+- Настроить интеграцию GitHub → Jenkins через вебхук (через публичный туннель Tuna/ngrok).
+- Реализовать Jenkins Pipeline (Declarative) из репозитория.
+- Обеспечить запуск тестов, merge dev→main и деплой.
+
+2. Описание проекта
+Проект: блог на Django (папки blog/, myproject/, manage.py, requirements.txt). База: SQLite по умолчанию. Шаблоны и стандартная структура Django, автотесты в blog/tests.py. Репозиторий публичный: https://github.com/drars38/django-blog
+
+3. Описание веток и коммитов в репозитории
+- Ветки: dev (разработка), main (стабильная).
+- Pipeline триггерится на push в dev. При успешных тестах выполняется merge dev→main с push в origin/main (с использованием GitHub PAT через Jenkins Credentials).
+- Для проверки триггера использовались пустые коммиты: "chore: trigger build" и т.п.
+
+4. Процесс настройки Jenkins
+4.1. Установка и доступ
+- Jenkins запущен локально на http://127.0.0.1:8080.
+- Публичный доступ организован через Tuna/ngrok с проксированием на 127.0.0.1:8080.
+
+4.2. Credentials
+- В Jenkins: Manage Jenkins → Manage Credentials → System → Global → Add Credentials.
+- Kind: Username with password; Username: GitHub логин; Password: PAT; ID: github-token1.
+
+4.3. Jenkins URL
+- Manage Jenkins → Configure System → Jenkins URL = публичный адрес туннеля (https://<tunnel>/), чтобы избежать редиректов (302) и проблем вебхука.
+
+4.4. Джоба (Pipeline from SCM)
+- Definition: Pipeline script from SCM; SCM: Git.
+- Repository URL: https://github.com/drars38/django-blog; Credentials: github-token1.
+- Branches to build: */dev; Script Path: Jenkinsfile.
+- Build Triggers: GitHub hook trigger for GITScm polling.
+
+4.5. Webhook GitHub
+- Repo → Settings → Webhooks → Add webhook.
+- Payload URL: https://<tunnel>/github-webhook/ (со слэшем на конце), Content type: application/json, Events: Just the push event.
+- Recent deliveries: ожидается статус 200.
+
+5. Описание автотестов
+Автотесты реализованы в файле blog/tests.py и покрывают модели, представления (views), формы/процессы и API.
+
+- Запуск: `python manage.py test` (в пайплайне — стадия Run tests).
+- Перед тестами выполняются миграции БД (`makemigrations`, `migrate`) для актуальной схемы.
+- Любая ошибка тестов останавливает конвейер и блокирует merge/deploy.
+
+Состав тестов:
+- PostModelTest:
+  · setUp — создание пользователя и опубликованного поста.
+  · test_post_creation — проверка полей поста и даты создания.
+  · test_post_str_representation — строковое представление модели Post (заголовок).
+  · test_post_ordering — новые посты выводятся первыми (проверка ordering).
+
+- CommentModelTest:
+  · setUp — создание пользователя, поста и комментария.
+  · test_comment_creation — корректные связи (post/author) и содержимое.
+  · test_comment_str_representation — формат строки “Комментарий от <user> к статье <title>”.
+
+- ViewTests:
+  · setUp — клиент, пользователь, опубликованный пост.
+  · test_home_view — главная страница (200), содержит приветствие и заголовок поста.
+  · test_post_list_view — список постов (200), содержит заголовок поста.
+  · test_post_detail_view — детальная страница поста (200), содержит заголовок и контент.
+  · test_post_detail_view_404 — запрос несуществующего поста → 404.
+  · test_register_view_get — страница регистрации (200), содержит “Регистрация”.
+  · test_register_view_post — успешная регистрация → 302 и появление пользователя.
+  · test_my_posts_view_requires_login — редирект 302 без авторизации.
+  · test_my_posts_view_authenticated — для авторизованного 200, содержит “Мои статьи” и пост.
+  · test_create_post_view_requires_login — редирект 302 без авторизации.
+  · test_create_post_view_authenticated — страница создания поста (200), содержит форму.
+  · test_create_post_post_request — POST создаёт пост → 302, запись в БД существует.
+  · test_api_posts_view — API (200, JSON), корректность полей и автора.
+
+- CommentTests:
+  · test_add_comment_authenticated — авторизованный пользователь добавляет комментарий → 302; проверка содержимого и связей.
+
+- IntegrationTests (сквозной сценарий):
+  · Регистрация нового пользователя → 302;
+  · Логин и создание поста → 302;
+  · Пост виден в списке;
+  · Добавление комментария к посту → 302; комментарий отображается на детальной странице;
+  · API возвращает корректный JSON с ожидаемым `comment_count`.
+
+6. Реализация Job, связь с репозиторием и Pipeline
+6.1. Связь с репозиторием
+- Джоба читает Jenkinsfile из ветки dev (Pipeline from SCM, Git URL + credentials, ветка */dev).
+
+6.2. Pipeline (стадии)
+- Checkout: извлечение кода из репо.
+- Setup Python: проверка версий python/pip в агенте.
+- Install dependencies: pip install -r requirements.txt.
+- Migrate (SQLite): применение миграций.
+- Run tests: запуск автотестов.
+- Deploy Dev: вызов deploy.bat dev 8001 (поднимает сервер на 8001, пишет лог в deploy_dev.log).
+- Merge dev → main (on success):
+  · Через withCredentials берутся логин и PAT.
+  · Выполняется fetch, checkout main от origin/main, merge dev → main, push обратно в repo.
+- Deploy Prod: обновление локального main до origin/main и вызов deploy.bat prod 8000 (прод среда).
+
+6.3. Обоснование подхода
+- Declarative Pipeline выбран за читаемость, поддержку стандартных триггеров и простую поддержку этапов.
+- Проверки веток и условий вынесены в pipeline/шаги, чтобы корректно работать даже при detached HEAD.
+- Push/merge выполняется с использованием Jenkins Credentials (без хранения секретов в репозитории).
+
+7. Демонстрация работы
+Шаги демонстрации:
+1) Разработчик пушит изменения в dev.
+2) GitHub → Webhook → Jenkins (через туннель) триггерит сборку.
+3) Выполняются стадии: checkout → deps → миграции → тесты.
+4) Успех тестов: выполняется Deploy Dev (порт 8001), затем merge dev→main и push.
+5) Обновлённый main деплоится на порт 8000 (Deploy Prod).
+6) Статусы видны в консоли Jenkins; доступ к сервисам: http://localhost:8001 (dev) и http://localhost:8000 (prod).
+
+8. Выводы
+- Настроен полный цикл CI/CD: автозапуск по push, тестирование, автоматический merge и развёртывание.
+- Решены типичные проблемы: редиректы 302 у вебхука, проксирование туннелем, определение ветки в detached HEAD.
+- Секреты не попадают в репозиторий, используются Jenkins Credentials.
+
+9. Заключение
+Практический пайплайн на Jenkins для Django-проекта реализован и готов к расширению: можно добавить линтеры, сборку Docker-образов, деплой на удалённый сервер или Kubernetes, а также заменить прямой merge на автоматическое создание Pull Request при включённой защите веток.
+
+

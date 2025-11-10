@@ -1,0 +1,187 @@
+pipeline {
+    agent any
+
+    options {
+        skipDefaultCheckout(true)
+        timestamps()
+    }
+
+    triggers {
+        // Требуется установленный GitHub plugin и настроенный webhook на Jenkins
+        githubPush()
+    }
+
+    environment {
+        DJANGO_SETTINGS_MODULE = 'myproject.settings'
+        PYTHONPATH = "${WORKSPACE}"
+        // Переключатель: если '1' — используем Docker-конвейер
+        USE_DOCKER = "1"
+        // Явный путь к git.exe для Windows-агента (чтобы bat 'git' не падал из-за PATH)
+        GIT_EXE = 'C:\\Program Files\\Git\\bin\\git.exe'
+        // Креденшл для логина в GHCR (Secret text с PAT) или GitHub App Token
+        GHCR_CREDENTIALS_ID = 'ghcr-token'
+        GITHUB_OWNER = "${env.GIT_URL?.tokenize('/')[-2] ?: 'owner'}"
+        IMAGE_NAME = "ghcr.io/${GITHUB_OWNER}/myproject-web"
+    }
+
+    stages {
+        stage('Docker: Build') {
+            when { expression { return env.USE_DOCKER == '1' } }
+            steps {
+                bat '''
+                    docker --version
+                    docker build -t %IMAGE_NAME%:%GIT_COMMIT% -f myproject/Dockerfile myproject
+                '''
+            }
+        }
+
+        stage('Docker: Test') {
+            when { expression { return env.USE_DOCKER == '1' } }
+            steps {
+                bat '''
+                    docker run --rm %IMAGE_NAME%:%GIT_COMMIT% python manage.py test --verbosity=2
+                '''
+            }
+        }
+
+        stage('Docker: Push') {
+            when { allOf { expression { return env.USE_DOCKER == '1' }; not { changeRequest() } } }
+            steps {
+                withCredentials([string(credentialsId: env.GHCR_CREDENTIALS_ID, variable: 'CR_PAT')]) {
+                    bat '''
+                        echo %CR_PAT% | docker login ghcr.io -u %GITHUB_OWNER% --password-stdin
+                        docker tag %IMAGE_NAME%:%GIT_COMMIT% %IMAGE_NAME%:latest
+                        docker push %IMAGE_NAME%:%GIT_COMMIT%
+                        docker push %IMAGE_NAME%:latest
+                    '''
+                }
+            }
+        }
+
+        stage('Docker: Deploy (Compose)') {
+            when { allOf { expression { return env.USE_DOCKER == '1' }; not { changeRequest() } } }
+            steps {
+                // Предполагается, что compose-файл лежит в myproject/docker-compose.yml на целевой машине/агенте
+                bat '''
+                    docker compose -f myproject/docker-compose.yml pull web
+                    docker compose -f myproject/docker-compose.yml up -d
+                    docker compose -f myproject/docker-compose.yml exec -T web python manage.py migrate --noinput
+                '''
+            }
+        }
+        stage('Checkout') {
+            steps {
+                checkout scm
+                bat '"%GIT_EXE%" --version'
+                bat '"%GIT_EXE%" status'
+            }
+        }
+
+        stage('Setup Python') {
+            when { expression { return env.USE_DOCKER != '1' } }
+            steps {
+                bat '''
+                    python --version
+                    pip --version
+                '''
+            }
+        }
+
+        stage('Install dependencies') {
+            when { expression { return env.USE_DOCKER != '1' } }
+            steps {
+                bat '''
+                    pip install -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Migrate (SQLite)') {
+            when { expression { return env.USE_DOCKER != '1' } }
+            steps {
+                bat '''
+                    python manage.py makemigrations --noinput
+                    python manage.py migrate --noinput
+                '''
+            }
+        }
+
+        stage('Run tests') {
+            when { expression { return env.USE_DOCKER != '1' } }
+            steps {
+                bat '''
+                    python manage.py test --verbosity=2
+                '''
+            }
+        }
+
+        stage('Deploy Dev') {
+            when { expression { return env.USE_DOCKER != '1' } }
+            steps {
+                bat '''
+                    call deploy.bat dev 8001
+                '''
+            }
+        }
+
+        stage('Merge dev -> main (on success)') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: GITHUB_CREDENTIALS_ID, usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_TOKEN')]) {
+                    bat '''
+                        setlocal enableextensions enabledelayedexpansion
+                        git config user.name "Jenkins CI"
+                        git config user.email "ci@example.local"
+
+                        rem Получаем origin URL
+                        for /f "delims=" %%i in ('git remote get-url origin') do set ORIGIN_URL=%%i
+                        echo Origin: !ORIGIN_URL!
+
+                        rem Строим URL с авторизацией для push
+                        set AUTH_URL=!ORIGIN_URL:https://=https://%GIT_USERNAME%:%GIT_TOKEN%@!
+
+                        rem Обновляем refs
+                        git fetch origin +refs/heads/*:refs/remotes/origin/*
+
+                        rem Переключаемся на main и подтягиваем актуальное
+                        git checkout -B main origin/main
+                        git merge --no-ff dev -m "Auto-merge dev into main [Jenkins]"
+
+                        rem Пушим main
+                        git push "!AUTH_URL!" main
+
+                        rem Возврат на dev (необязательно)
+                        git checkout dev
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Prod') {
+            when { expression { return env.USE_DOCKER != '1' } }
+            steps {
+                bat '''
+                    rem Обновляем локальный main до origin/main и деплоим
+                    git fetch origin +refs/heads/*:refs/remotes/origin/*
+                    git checkout -B main origin/main
+                    call deploy.bat prod 8000
+                    rem Возвращаемся на dev для консистентности
+                    git checkout dev
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Сборка прошла успешно'
+        }
+        failure {
+            echo '❌ Ошибка сборки'
+        }
+        always {
+            echo "Готово: ${currentBuild.currentResult}"
+        }
+    }
+}
+
+

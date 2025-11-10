@@ -1,0 +1,62 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: myproject-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mydb}
+      POSTGRES_USER: ${POSTGRES_USER:-myuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mypassword}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/${GITHUB_OWNER:-local}/myproject-web:latest
+    container_name: myproject-web
+    restart: unless-stopped
+    environment:
+      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-myproject.settings}
+      DEBUG: ${DEBUG:-0}
+      SECRET_KEY: ${SECRET_KEY:-changeme}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-*}
+      DB_ENGINE: django.db.backends.postgresql
+      DB_NAME: ${POSTGRES_DB:-mydb}
+      DB_USER: ${POSTGRES_USER:-myuser}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-mypassword}
+      DB_HOST: db
+      DB_PORT: 5432
+      PYTHONUNBUFFERED: 1
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8000"
+    volumes:
+      - staticfiles:/app/staticfiles
+    command: ["gunicorn", "myproject.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "3"]
+
+  nginx:
+    image: nginx:alpine
+    container_name: myproject-nginx
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - staticfiles:/static:ro
+
+volumes:
+  db_data:
+  staticfiles:
+
+
