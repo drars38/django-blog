@@ -26,12 +26,24 @@ pipeline {
     }
 
     stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                bat '"%GIT_EXE%" --version'
+                bat '"%GIT_EXE%" status'
+            }
+        }
+
         stage('Docker: Build') {
             when { expression { return env.USE_DOCKER == '1' } }
             steps {
                 bat '''
                     docker --version
-                    docker build -t %IMAGE_NAME%:%GIT_COMMIT% -f myproject/Dockerfile myproject
+                    rem Вычисляем тег: GIT_COMMIT или номер билда
+                    set TAG=%GIT_COMMIT%
+                    if "%TAG%"=="" set TAG=%BUILD_NUMBER%
+                    echo Using image tag: %TAG%
+                    docker build -t %IMAGE_NAME%:%TAG% -f myproject/Dockerfile myproject
                 '''
             }
         }
@@ -40,7 +52,10 @@ pipeline {
             when { expression { return env.USE_DOCKER == '1' } }
             steps {
                 bat '''
-                    docker run --rm %IMAGE_NAME%:%GIT_COMMIT% python manage.py test --verbosity=2
+                    rem Вычисляем тег так же, как в build
+                    set TAG=%GIT_COMMIT%
+                    if "%TAG%"=="" set TAG=%BUILD_NUMBER%
+                    docker run --rm %IMAGE_NAME%:%TAG% python manage.py test --verbosity=2
                 '''
             }
         }
@@ -51,8 +66,11 @@ pipeline {
                 withCredentials([string(credentialsId: env.GHCR_CREDENTIALS_ID, variable: 'CR_PAT')]) {
                     bat '''
                         echo %CR_PAT% | docker login ghcr.io -u %GITHUB_OWNER% --password-stdin
-                        docker tag %IMAGE_NAME%:%GIT_COMMIT% %IMAGE_NAME%:latest
-                        docker push %IMAGE_NAME%:%GIT_COMMIT%
+                        rem Вычисляем тег так же, как в build
+                        set TAG=%GIT_COMMIT%
+                        if "%TAG%"=="" set TAG=%BUILD_NUMBER%
+                        docker tag %IMAGE_NAME%:%TAG% %IMAGE_NAME%:latest
+                        docker push %IMAGE_NAME%:%TAG%
                         docker push %IMAGE_NAME%:latest
                     '''
                 }
@@ -68,13 +86,6 @@ pipeline {
                     docker compose -f myproject/docker-compose.yml up -d
                     docker compose -f myproject/docker-compose.yml exec -T web python manage.py migrate --noinput
                 '''
-            }
-        }
-        stage('Checkout') {
-            steps {
-                checkout scm
-                bat '"%GIT_EXE%" --version'
-                bat '"%GIT_EXE%" status'
             }
         }
 
