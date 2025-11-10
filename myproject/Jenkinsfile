@@ -23,6 +23,8 @@ pipeline {
         // ВАЖНО: избегаем вычислений в environment (ломает декларативный пайплайн). Укажи своего владельца GitHub явно.
         GITHUB_OWNER = 'drars38'
         IMAGE_NAME = "ghcr.io/drars38/myproject-web"
+        // Ссылка на развернутый сайт (порт 80 из docker-compose)
+        SITE_URL = 'http://localhost/'
         // Опциональные креды для auto-merge; если пусто — стадия будет пропущена
         GITHUB_CREDENTIALS_ID = ''
     }
@@ -87,6 +89,9 @@ pipeline {
                     docker compose -f myproject/docker-compose.yml pull web
                     docker compose -f myproject/docker-compose.yml up -d
                     docker compose -f myproject/docker-compose.yml exec -T web python manage.py migrate --noinput
+                    rem Создаем суперпользователя admin/123 если его еще нет
+                    docker compose -f myproject/docker-compose.yml exec -T web python manage.py shell -c "from django.contrib.auth import get_user_model; U=get_user_model(); u='admin'; p='123'; e='admin@example.com'; U.objects.filter(username=u).exists() or U.objects.create_superuser(u,e,p) and print('Superuser created/exists')"
+                    echo Site URL: %SITE_URL%
                 '''
             }
         }
