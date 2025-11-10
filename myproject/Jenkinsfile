@@ -23,6 +23,8 @@ pipeline {
         // ВАЖНО: избегаем вычислений в environment (ломает декларативный пайплайн). Укажи своего владельца GitHub явно.
         GITHUB_OWNER = 'drars38'
         IMAGE_NAME = "ghcr.io/drars38/myproject-web"
+        // Опциональные креды для auto-merge; если пусто — стадия будет пропущена
+        GITHUB_CREDENTIALS_ID = ''
     }
 
     stages {
@@ -137,8 +139,11 @@ pipeline {
         }
 
         stage('Merge dev -> main (on success)') {
+            when {
+                expression { return env.GITHUB_CREDENTIALS_ID?.trim() }
+            }
             steps {
-                withCredentials([usernamePassword(credentialsId: GITHUB_CREDENTIALS_ID, usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_TOKEN')]) {
+                withCredentials([usernamePassword(credentialsId: env.GITHUB_CREDENTIALS_ID, usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_TOKEN')]) {
                     bat '''
                         setlocal enableextensions enabledelayedexpansion
                         git config user.name "Jenkins CI"
