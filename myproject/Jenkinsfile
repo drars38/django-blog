@@ -86,8 +86,17 @@ pipeline {
             steps {
                 // Предполагается, что compose-файл лежит в myproject/docker-compose.yml на целевой машине/агенте
                 bat '''
-                    docker compose -f myproject/docker-compose.yml pull web
-                    docker compose -f myproject/docker-compose.yml up -d
+                    rem Вычисляем тег так же, как в build
+                    set TAG=%GIT_COMMIT%
+                    if "%TAG%"=="" set TAG=%BUILD_NUMBER%
+                    rem Пересобираем образ с актуальным кодом из workspace (без кеша для гарантии свежести)
+                    echo Rebuilding image with latest code...
+                    docker build -t %IMAGE_NAME%:%TAG% -t %IMAGE_NAME%:latest -f myproject/Dockerfile myproject
+                    rem Останавливаем старые контейнеры и запускаем новые с актуальным образом
+                    docker compose -f myproject/docker-compose.yml down
+                    docker compose -f myproject/docker-compose.yml up -d --build
+                    rem Ждем пока web контейнер запустится
+                    timeout /t 5 /nobreak
                     docker compose -f myproject/docker-compose.yml exec -T web python manage.py migrate --noinput
                     rem Создаем суперпользователя admin/123 если его еще нет
                     docker compose -f myproject/docker-compose.yml exec -T web python manage.py shell -c "from django.contrib.auth import get_user_model; U=get_user_model(); u='admin'; p='123'; e='admin@example.com'; U.objects.filter(username=u).exists() or U.objects.create_superuser(u,e,p) and print('Superuser created/exists')"
