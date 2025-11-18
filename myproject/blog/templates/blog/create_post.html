@@ -1,0 +1,42 @@
+{% extends 'blog/base.html' %}
+
+{% block title %}Создать статью - Мой Блог{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <h3>Создать новую статью</h3>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="title" class="form-label">Заголовок</label>
+                        <input type="text" class="form-control" id="title" name="title" required>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="content" class="form-label">Содержание</label>
+                        <textarea class="form-control" id="content" name="content" rows="10" required></textarea>
+                    </div>
+                    
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="is_published" name="is_published">
+                        <label class="form-check-label" for="is_published">
+                            Опубликовать сразу
+                        </label>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between">
+                        <a href="{% url 'my_posts' %}" class="btn btn-secondary">Отмена</a>
+                        <button type="submit" class="btn btn-primary">Создать статью</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

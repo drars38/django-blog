@@ -1,0 +1,209 @@
+pipeline {
+    agent any
+
+    options {
+        skipDefaultCheckout(true)
+        timestamps()
+    }
+
+    triggers {
+        // Требуется установленный GitHub plugin и настроенный webhook на Jenkins
+        githubPush()
+    }
+
+    environment {
+        DJANGO_SETTINGS_MODULE = 'myproject.settings'
+        PYTHONPATH = "${WORKSPACE}"
+        // Переключатель: если '1' — используем Docker-конвейер
+        USE_DOCKER = "1"
+        // Явный путь к git.exe для Windows-агента (чтобы bat 'git' не падал из-за PATH)
+        GIT_EXE = 'C:\\Program Files\\Git\\bin\\git.exe'
+        // Креденшл для логина в GHCR (Secret text с PAT) или GitHub App Token
+        GHCR_CREDENTIALS_ID = 'ghcr-token'
+        // ВАЖНО: избегаем вычислений в environment (ломает декларативный пайплайн). Укажи своего владельца GitHub явно.
+        GITHUB_OWNER = 'drars38'
+        IMAGE_NAME = "ghcr.io/drars38/myproject-web"
+        // Ссылка на развернутый сайт (порт 80 из docker-compose)
+        SITE_URL = 'http://localhost/'
+        // Опциональные креды для auto-merge; если пусто — стадия будет пропущена
+        GITHUB_CREDENTIALS_ID = 'github-token1'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                bat '"%GIT_EXE%" --version'
+                bat '"%GIT_EXE%" status'
+            }
+        }
+
+        stage('Docker: Build') {
+            when { expression { return env.USE_DOCKER == '1' } }
+            steps {
+                bat '''
+                    docker --version
+                    rem Вычисляем тег: GIT_COMMIT или номер билда
+                    set TAG=%GIT_COMMIT%
+                    if "%TAG%"=="" set TAG=%BUILD_NUMBER%
+                    echo Using image tag: %TAG%
+                    docker build -t %IMAGE_NAME%:%TAG% -f myproject/Dockerfile myproject
+                '''
+            }
+        }
+
+        stage('Docker: Test') {
+            when { expression { return env.USE_DOCKER == '1' } }
+            steps {
+                bat '''
+                    rem Вычисляем тег так же, как в build
+                    set TAG=%GIT_COMMIT%
+                    if "%TAG%"=="" set TAG=%BUILD_NUMBER%
+                    docker run --rm %IMAGE_NAME%:%TAG% python manage.py test --verbosity=2
+                '''
+            }
+        }
+
+        stage('Docker: Push') {
+            when { allOf { expression { return env.USE_DOCKER == '1' }; not { changeRequest() } } }
+            steps {
+                withCredentials([string(credentialsId: env.GHCR_CREDENTIALS_ID, variable: 'CR_PAT')]) {
+                    bat '''
+                        echo %CR_PAT% | docker login ghcr.io -u %GITHUB_OWNER% --password-stdin
+                        rem Вычисляем тег так же, как в build
+                        set TAG=%GIT_COMMIT%
+                        if "%TAG%"=="" set TAG=%BUILD_NUMBER%
+                        docker tag %IMAGE_NAME%:%TAG% %IMAGE_NAME%:latest
+                        docker push %IMAGE_NAME%:%TAG%
+                        docker push %IMAGE_NAME%:latest
+                    '''
+                }
+            }
+        }
+
+        stage('Docker: Deploy (Compose)') {
+            when { allOf { expression { return env.USE_DOCKER == '1' }; not { changeRequest() } } }
+            steps {
+                // Предполагается, что compose-файл лежит в myproject/docker-compose.yml на целевой машине/агенте
+                bat '''
+                    docker compose -f myproject/docker-compose.yml pull web
+                    docker compose -f myproject/docker-compose.yml up -d
+                    docker compose -f myproject/docker-compose.yml exec -T web python manage.py migrate --noinput
+                    rem Создаем суперпользователя admin/123 если его еще нет
+                    docker compose -f myproject/docker-compose.yml exec -T web python manage.py shell -c "from django.contrib.auth import get_user_model; U=get_user_model(); u='admin'; p='123'; e='admin@example.com'; U.objects.filter(username=u).exists() or U.objects.create_superuser(u,e,p) and print('Superuser created/exists')"
+                    echo Site URL: %SITE_URL%
+                '''
+            }
+        }
+
+        stage('Setup Python') {
+            when { expression { return env.USE_DOCKER != '1' } }
+            steps {
+                bat '''
+                    python --version
+                    pip --version
+                '''
+            }
+        }
+
+        stage('Install dependencies') {
+            when { expression { return env.USE_DOCKER != '1' } }
+            steps {
+                bat '''
+                    pip install -r requirements.txt
+                '''
+            }
+        }
+
+        stage('Migrate (SQLite)') {
+            when { expression { return env.USE_DOCKER != '1' } }
+            steps {
+                bat '''
+                    python manage.py makemigrations --noinput
+                    python manage.py migrate --noinput
+                '''
+            }
+        }
+
+        stage('Run tests') {
+            when { expression { return env.USE_DOCKER != '1' } }
+            steps {
+                bat '''
+                    python manage.py test --verbosity=2
+                '''
+            }
+        }
+
+        stage('Deploy Dev') {
+            when { expression { return env.USE_DOCKER != '1' } }
+            steps {
+                bat '''
+                    call deploy.bat dev 8001
+                '''
+            }
+        }
+
+        stage('Merge dev -> main (on success)') {
+            when {
+                expression { return env.GITHUB_CREDENTIALS_ID?.trim() }
+            }
+            steps {
+                withCredentials([usernamePassword(credentialsId: env.GITHUB_CREDENTIALS_ID, usernameVariable: 'GIT_USERNAME', passwordVariable: 'GIT_TOKEN')]) {
+                    bat '''
+                        setlocal enableextensions enabledelayedexpansion
+                        git config user.name "Jenkins CI"
+                        git config user.email "ci@example.local"
+
+                        rem Получаем origin URL
+                        for /f "delims=" %%i in ('git remote get-url origin') do set ORIGIN_URL=%%i
+                        echo Origin: !ORIGIN_URL!
+
+                        rem Строим URL с авторизацией для push
+                        set AUTH_URL=!ORIGIN_URL:https://=https://%GIT_USERNAME%:%GIT_TOKEN%@!
+
+                        rem Обновляем refs
+                        git fetch origin +refs/heads/*:refs/remotes/origin/*
+
+                        rem Переключаемся на main и подтягиваем актуальное
+                        git checkout -B main origin/main
+                        git merge --no-ff dev -m "Auto-merge dev into main [Jenkins]"
+
+                        rem Пушим main
+                        git push "!AUTH_URL!" main
+
+                        rem Возврат на dev (необязательно)
+                        git checkout dev
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Prod') {
+            when { expression { return env.USE_DOCKER != '1' } }
+            steps {
+                bat '''
+                    rem Обновляем локальный main до origin/main и деплоим
+                    git fetch origin +refs/heads/*:refs/remotes/origin/*
+                    git checkout -B main origin/main
+                    call deploy.bat prod 8000
+                    rem Возвращаемся на dev для консистентности
+                    git checkout dev
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Сборка прошла успешно'
+        }
+        failure {
+            echo '❌ Ошибка сборки'
+        }
+        always {
+            echo "Готово: ${currentBuild.currentResult}"
+        }
+    }
+}
+
+

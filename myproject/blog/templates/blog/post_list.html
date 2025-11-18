@@ -1,0 +1,66 @@
+{% extends 'blog/base.html' %}
+
+{% block title %}Все статьи - Мой Блог{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-lg-8">
+        <h1 class="mb-4">Все статьи</h1>
+        
+        {% if posts %}
+            {% for post in posts %}
+                <div class="card mb-4 post-card">
+                    <div class="card-body">
+                        <h3 class="card-title">
+                            <a href="{% url 'post_detail' post.pk %}" class="text-decoration-none">
+                                {{ post.title }}
+                            </a>
+                        </h3>
+                        <p class="card-text">{{ post.content|truncatewords:30 }}</p>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <small class="text-muted">
+                                    <strong>Автор:</strong> {{ post.author.username }} • 
+                                    <strong>Дата:</strong> {{ post.created_at|date:"d.m.Y H:i" }}
+                                </small>
+                            </div>
+                            <div>
+                                <span class="badge bg-secondary">{{ post.comments.count }} комментариев</span>
+                                <a href="{% url 'post_detail' post.pk %}" class="btn btn-primary btn-sm ms-2">Читать</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="alert alert-info text-center">
+                <h4>Статей пока нет</h4>
+                <p>Первый автор может создать статью!</p>
+                {% if user.is_authenticated %}
+                    <a href="{% url 'create_post' %}" class="btn btn-primary">Создать статью</a>
+                {% else %}
+                    <a href="{% url 'register' %}" class="btn btn-primary">Зарегистрироваться</a>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+    
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header">
+                <h5>Навигация</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled">
+                    <li><a href="{% url 'home' %}" class="text-decoration-none">← Главная</a></li>
+                    {% if user.is_authenticated %}
+                        <li><a href="{% url 'my_posts' %}" class="text-decoration-none">Мои статьи</a></li>
+                        <li><a href="{% url 'create_post' %}" class="text-decoration-none">Создать статью</a></li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
