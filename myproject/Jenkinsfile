@@ -89,12 +89,11 @@ pipeline {
                     rem Вычисляем тег так же, как в build
                     set TAG=%GIT_COMMIT%
                     if "%TAG%"=="" set TAG=%BUILD_NUMBER%
-                    rem Пересобираем образ с актуальным кодом из workspace (без кеша для гарантии свежести)
+                    rem Пересобираем образ с актуальным кодом из workspace
                     echo Rebuilding image with latest code...
                     docker build -t %IMAGE_NAME%:%TAG% -t %IMAGE_NAME%:latest -f myproject/Dockerfile myproject
-                    rem Останавливаем старые контейнеры и запускаем новые с актуальным образом
-                    docker compose -f myproject/docker-compose.yml down
-                    docker compose -f myproject/docker-compose.yml up -d --build
+                    rem Пересобираем и перезапускаем только web контейнер без удаления остальных
+                    docker compose -f myproject/docker-compose.yml up -d --build --force-recreate --no-deps web
                     rem Ждем пока web контейнер запустится
                     timeout /t 5 /nobreak
                     docker compose -f myproject/docker-compose.yml exec -T web python manage.py migrate --noinput
@@ -175,7 +174,7 @@ pipeline {
 
                         rem Переключаемся на main и подтягиваем актуальное
                         git checkout -B main origin/main
-                        git merge --no-ff dev -m "Auto-merge dev into main [Jenkins]"
+                        git merge --no-ff --allow-unrelated-histories dev -m "Auto-merge dev into main [Jenkins]"
 
                         rem Пушим main
                         git push "!AUTH_URL!" main
