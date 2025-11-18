@@ -26,7 +26,7 @@ pipeline {
         // Ссылка на развернутый сайт (порт 80 из docker-compose)
         SITE_URL = 'http://localhost/'
         // Опциональные креды для auto-merge; если пусто — стадия будет пропущена
-        GITHUB_CREDENTIALS_ID = ''
+        GITHUB_CREDENTIALS_ID = 'github-token1'
     }
 
     stages {
